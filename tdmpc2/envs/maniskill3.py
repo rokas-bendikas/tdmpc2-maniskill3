@@ -164,6 +164,39 @@ class ManiSkillWrapper(gym.Wrapper):
         return obs, reward, done, info
 
 
+class ActionRepeatWrapper(gym.Wrapper):
+    def __init__(self, env, repeat=2):
+        super().__init__(env)
+        self.repeat = repeat
+
+    def step(self, action):
+        reward = 0
+        for _ in range(self.repeat):
+            obs, r, done, info = self.env.step(action)
+            reward += r
+            if done:
+                break
+        return obs, reward, done, info
+
+    def reset(self):
+        return self.env.reset()
+
+    def render(self, mode="human", **kwargs):
+        return self.env.render(mode, **kwargs)
+
+    def close(self):
+        return self.env.close()
+
+    def seed(self, seed=None):
+        return self.env.seed(seed)
+
+    def unwrapped(self):
+        return self.env.unwrapped
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+
+
 def make_env(cfg):
     """
     Make ManiSkill3 environment.
@@ -185,4 +218,5 @@ def make_env(cfg):
     env = ManiSkillCPUGymWrapper(env)
     env = Gymnasium2GymWrapper(env)
     env = ManiSkillWrapper(env)
+    env = ActionRepeatWrapper(env, repeat=2)
     return env

@@ -2,10 +2,10 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-# task: push-cube-multiview
-task: quadruped-walk
-# obs: rgb_multiview
-obs: rgb
+task: push-cube-multiview
+# task: quadruped-walk
+obs: rgb_multiview
+# obs: rgb
 
 # evaluation
 checkpoint: ???
@@ -67,7 +67,7 @@ simnorm_dim: 8
 wandb_project: nerf-pose-prior
 wandb_entity: project-ava
 wandb_silent: false
-disable_wandb: true
+disable_wandb: false
 save_csv: false
 
 # misc
