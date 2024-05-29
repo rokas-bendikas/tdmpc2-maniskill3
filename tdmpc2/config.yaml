@@ -2,13 +2,15 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
-obs: state
+# task: push-cube-multiview
+task: quadruped-walk
+# obs: rgb_multiview
+obs: rgb
 
 # evaluation
 checkpoint: ???
 eval_episodes: 10
-eval_freq: 50000
+eval_freq: 1100
 
 # training
 steps: 10_000_000
@@ -24,8 +26,8 @@ tau: 0.01
 discount_denom: 5
 discount_min: 0.95
 discount_max: 0.995
-buffer_size: 1_000_000
-exp_name: default
+buffer_size: 1_000_00
+exp_name: td-mpc2-baseline
 data_dir: ???
 
 # planning
@@ -62,11 +64,11 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: ???
-wandb_entity: ???
+wandb_project: nerf-pose-prior
+wandb_entity: project-ava
 wandb_silent: false
 disable_wandb: true
-save_csv: true
+save_csv: false
 
 # misc
 save_video: true

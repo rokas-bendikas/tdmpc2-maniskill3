@@ -17,6 +17,7 @@
 
 # base image
 FROM nvidia/cudagl:11.3.1-devel-ubuntu20.04
+ENV NVIDIA_DRIVER_CAPABILITIES all
 ENV DEBIAN_FRONTEND=noninteractive
 
 # packages
@@ -42,8 +43,7 @@ ENV PATH /opt/conda/bin:$PATH
 SHELL ["/bin/bash", "-c"]
 
 # conda environment
-COPY nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json
-COPY environment.yaml /root
+COPY docker/environment.yaml /root
 RUN conda update conda && \
     conda env update -n base -f /root/environment.yaml && \
     rm /root/environment.yaml && \
@@ -70,13 +70,29 @@ RUN pip install gym==0.21.0
 RUN pip install git+https://github.com/Farama-Foundation/Metaworld.git@04be337a12305e393c0caf0cbf5ec7755c7c8feb
 
 # maniskill2
-ENV MS2_ASSET_DIR /root/data
-RUN pip install mani-skill2==0.4.1 && \
-    cd /root && \
-    python -m mani_skill2.utils.download_asset all -y
+# ENV MS2_ASSET_DIR /root/data
+# RUN pip install mani-skill2==0.4.1 && \
+#     cd /root && \
+#     python -m mani_skill2.utils.download_asset all -y
+
+# maniskill3
+ENV MS_ASSET_DIR /root/data
+RUN pip install --upgrade mani_skill
+RUN python -m mani_skill.utils.download_asset all -y
+
+# sapien
+COPY docker/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json
+COPY docker/nvidia_layers.json /etc/vulkan/implicit_layer.d/nvidia_layers.json
+
+# download physx GPU binary via sapien
+RUN python -c "exec('import sapien.physx as physx;\ntry:\n  physx.enable_gpu()\nexcept:\n  pass;')"
 
 # myosuite (conflicts with meta-world / mani-skill2)
 # RUN pip install myosuite
+
+# Create working directory and copy files
+WORKDIR /tdmpc2
+COPY /tdmpc2 .
 
 # success!
 RUN echo "Successfully built TD-MPC2 Docker image!"
