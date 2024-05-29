@@ -6,9 +6,12 @@ import gym
 from collections import deque
 import torch
 from tensordict import TensorDict
+from typing import Dict, List
+import sapien
 
 
 class MultiViewEnv:
+    ADDITIONAL_CAMERA_SAMPLING_CONFIG: Dict[str, List[float]]
 
     def __init__(
         self,
@@ -27,16 +30,39 @@ class MultiViewEnv:
         ]
         self._center = scene_center
 
+    def _load_scene(self, options: dict):
+        super()._load_scene(options)
+        self.table_scene.ground.remove_from_scene()
+        self.table_scene.ground = self._build_fake_ground(
+            self.table_scene.scene, name="fake-ground"
+        )
+
+    def _build_fake_ground(self, scene, floor_width=20, altitude=0, name="ground"):
+        ground = scene.create_actor_builder()
+        ground.add_plane_collision(
+            pose=sapien.Pose(p=[0, 0, altitude], q=[0.7071068, 0, -0.7071068, 0]),
+        )
+        ground.add_plane_visual(
+            pose=sapien.Pose(p=[0, 0, altitude], q=[0.7071068, 0, -0.7071068, 0]),
+            scale=(floor_width, floor_width, floor_width),
+            material=sapien.render.RenderMaterial(
+                base_color=[0.9, 0.9, 0.93, 0], metallic=0.5, roughness=0.5
+            ),
+        )
+        return ground.build_static(name=name)
+
     def _sample_additional_camera_position(self):
         """Samples a random pose of a camera on the upper hemisphere."""
 
-        radius_limits = [0.4, 0.5]
+        radius_limits = self.ADDITIONAL_CAMERA_SAMPLING_CONFIG["radius_limits"]
         radius = np.random.uniform(*radius_limits)
 
         # Adjust the camera position horizontally.
-        phi = np.random.uniform(-0.3 * np.pi, 0.3 * np.pi)
+        phi_limits = self.ADDITIONAL_CAMERA_SAMPLING_CONFIG["phi_limits"]
+        phi = np.random.uniform(*phi_limits)
         # Adjust the camera elevation.
-        cos_theta = np.random.uniform(0.0, 1.0)
+        theta_limits = self.ADDITIONAL_CAMERA_SAMPLING_CONFIG["theta_limits"]
+        cos_theta = np.random.uniform(*theta_limits)
         theta = np.arccos(cos_theta)
 
         # Spherical to Cartesian conversion.
@@ -85,6 +111,24 @@ class MultiViewEnv:
             )
         return cam_list
 
+    @property
+    def _default_human_render_camera_configs(self):
+        """Add default cameras for rendering when using render_mode='rgb_array'. These can be overriden by the user at env creation time"""
+        FOV = np.pi / 2
+        pose = sapien_utils.look_at(
+            eye=self._sample_additional_camera_position(), target=[0, 0, 0.1]
+        )
+        return CameraConfig(
+            "render_camera",
+            pose=pose,
+            height=self._camera_resolutions[0],
+            width=self._camera_resolutions[1],
+            intrinsic=None,
+            fov=FOV,
+            near=self._near_far[0],
+            far=self._near_far[1],
+        )
+
 
 class MultiviewPixelWrapper(gym.Wrapper):
     """
@@ -117,13 +161,6 @@ class MultiviewPixelWrapper(gym.Wrapper):
                 self._frames[k] = deque([], maxlen=num_frames)
 
         self.observation_space = gym.spaces.Dict(obs_space)
-
-    # def _get_obs(self):
-    #     frame = self.env.render(
-    #         mode="rgb_array", width=self._render_size, height=self._render_size
-    #     ).transpose(2, 0, 1)
-    #     self._frames.append(frame)
-    #     return torch.from_numpy(np.concatenate(self._frames))
 
     def reset(self):
         obs = self.env.reset()

@@ -43,6 +43,7 @@ def train(cfg: dict):
     ```
     """
     assert torch.cuda.is_available()
+    torch.set_num_threads(12)
     assert cfg.steps > 0, "Must train for at least 1 step."
     cfg = parse_cfg(cfg)
     set_seed(cfg.seed)
