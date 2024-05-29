@@ -10,7 +10,7 @@ obs: rgb_multiview
 # evaluation
 checkpoint: ???
 eval_episodes: 10
-eval_freq: 1100
+eval_freq: 25000
 
 # training
 steps: 10_000_000
@@ -26,7 +26,7 @@ tau: 0.01
 discount_denom: 5
 discount_min: 0.95
 discount_max: 0.995
-buffer_size: 1_000_00
+buffer_size: 1_000_000
 exp_name: td-mpc2-baseline
 data_dir: ???
 
