@@ -41,7 +41,6 @@ def _submit(args, name):
     assert cmd is not None, f"No cmd found in config:\n{cfg}"
     cfg.update(
         name="rbendikas-" + _encode_name(name),
-        # namespace=context,
         wandb_key=wandb_key,
         cmd=" ".join([cmd, args]),
     )
@@ -58,11 +57,8 @@ def _submit(args, name):
 
 
 def _submit_batch(kwargs: dict):
-    # remove the tags and convert to a single string
-    tags = kwargs.pop("wandb.tags", None)
-    tags = "[" + ",".join(tags) + "]" if tags is not None else None
-    tasks = kwargs.pop("tasks")
-    tasks = "[" + ",".join(tasks) + "]"
+    # tasks = kwargs.pop("tasks")
+    # tasks = "[" + ",".join(tasks) + "]"
     arg_list = list(itertools.product(*kwargs.values()))
     if len(arg_list) > 16:
         print(
@@ -76,10 +72,7 @@ def _submit_batch(kwargs: dict):
     )
     for args in arg_list:
         args = " ".join([f"{k}={v}" for k, v in zip(kwargs.keys(), args)])
-        # Add the tags back
-        if tags is not None:
-            args += f" wandb.tags={tags}"
-        args += f" tasks={tasks}"
+        # args += f" tasks={tasks}"
         _submit(args, name=kwargs["exp_name"][0] if "exp_name" in kwargs else "default")
 
 
