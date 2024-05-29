@@ -11,6 +11,7 @@ from mani_skill.envs.tasks import (
 )
 from mani_skill.utils.wrappers.gymnasium import ManiSkillCPUGymWrapper
 from .maniskill3_multiview import MultiViewEnv
+from envs.wrappers.time_limit import TimeLimit
 
 
 class PickCubeEnv(PickCubeEnvOriginal):
@@ -46,8 +47,10 @@ MANISKILL_MULTIVIEW_TASKS = {
 }
 
 
-@register_env("PushCube-v1-multiview", max_episode_steps=100)
+@register_env("PushCube-v1-multiview")
 class PushCubeEnvMultiView(MultiViewEnv, PushCubeEnv):
+    SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
+
     def __init__(self, *args, **kwargs):
         MultiViewEnv.__init__(
             self,
@@ -59,8 +62,10 @@ class PushCubeEnvMultiView(MultiViewEnv, PushCubeEnv):
         PushCubeEnv.__init__(self, *args, **kwargs)
 
 
-@register_env("PickCube-v1-multiview", max_episode_steps=100)
+@register_env("PickCube-v1-multiview")
 class PickCubeEnvMultiView(MultiViewEnv, PickCubeEnv):
+    SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
+
     def __init__(self, *args, **kwargs):
         MultiViewEnv.__init__(
             self,
@@ -72,8 +77,10 @@ class PickCubeEnvMultiView(MultiViewEnv, PickCubeEnv):
         PickCubeEnv.__init__(self, *args, **kwargs)
 
 
-@register_env("StackCube-v1-multiview", max_episode_steps=100)
+@register_env("StackCube-v1-multiview")
 class StackCubeEnvMultiView(MultiViewEnv, StackCubeEnv):
+    SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
+
     def __init__(self, *args, **kwargs):
         MultiViewEnv.__init__(
             self,
@@ -85,8 +92,10 @@ class StackCubeEnvMultiView(MultiViewEnv, StackCubeEnv):
         StackCubeEnv.__init__(self, *args, **kwargs)
 
 
-@register_env("PickSingleYCB-v1-multiview", max_episode_steps=100)
+@register_env("PickSingleYCB-v1-multiview")
 class PickSingleYCBEnvMultiView(MultiViewEnv, PickSingleYCBEnv):
+    SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
+
     def __init__(self, *args, **kwargs):
         MultiViewEnv.__init__(
             self,
@@ -104,7 +113,6 @@ class Gymnasium2GymWrapper(gym.Wrapper):
         self.env = env
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
-        self.max_episode_steps = self.env.env._max_episode_steps
 
     def reset(self, *args, **kwargs):
         obs, _ = self.env.reset(*args, **kwargs)
@@ -117,7 +125,7 @@ class Gymnasium2GymWrapper(gym.Wrapper):
         return obs, reward, done, info
 
 
-class ManiSkillWrapper(gym.Wrapper):
+class MultiViewManiSkillWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.env = env
@@ -142,7 +150,6 @@ class ManiSkillWrapper(gym.Wrapper):
             high=np.full(self.env.action_space.shape, self.env.action_space.high.max()),
             dtype=self.env.action_space.dtype,
         )
-        self.max_episode_steps = self.env.max_episode_steps
 
     def _get_obs(self, obs):
         state = np.concatenate([obs["agent"]["qpos"], obs["agent"]["qvel"]])
@@ -161,7 +168,7 @@ class ManiSkillWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, done, info = super().step(action)
         obs = self._get_obs(obs)
-        return obs, reward, done, info
+        return obs, reward, False, info
 
 
 class ActionRepeatWrapper(gym.Wrapper):
@@ -217,6 +224,8 @@ def make_env(cfg):
     )
     env = ManiSkillCPUGymWrapper(env)
     env = Gymnasium2GymWrapper(env)
-    env = ManiSkillWrapper(env)
+    env = MultiViewManiSkillWrapper(env)
     env = ActionRepeatWrapper(env, repeat=2)
+    env = TimeLimit(env, max_episode_steps=100)
+    env.max_episode_steps = env._max_episode_steps
     return env
