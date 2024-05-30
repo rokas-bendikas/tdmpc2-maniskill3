@@ -382,6 +382,9 @@ class Gymnasium2GymWrapper(gym.Wrapper):
     def render(self, *args, **kwargs):
         return self.env.render()
 
+    def seed(self, seed):
+        self.env.reset(seed=seed)
+
 
 class ManiSkillWrapper(gym.Wrapper):
     def __init__(self, env):
@@ -445,8 +448,8 @@ class ActionRepeatWrapper(gym.Wrapper):
     def close(self):
         return self.env.close()
 
-    def seed(self, seed=None):
-        return self.env.seed(seed)
+    # def seed(self, seed=None):
+    #     return self.env.seed(seed)
 
     def unwrapped(self):
         return self.env.unwrapped
