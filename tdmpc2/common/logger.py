@@ -178,6 +178,11 @@ class Logger:
         os.environ["WANDB_SILENT"] = "true" if cfg.wandb_silent else "false"
         import wandb
 
+        cfg_container = OmegaConf.to_container(cfg, resolve=True)
+        # Add node name to configuration
+        if "KUBERNETES_NODENAME" in os.environ:
+            cfg_container["node_name"] = os.environ["KUBERNETES_NODENAME"]
+
         wandb.init(
             project=self.project,
             entity=self.entity,
@@ -185,7 +190,7 @@ class Logger:
             group=self._group,
             tags=cfg_to_group(cfg, return_list=True) + [f"seed:{cfg.seed}"],
             dir=self._log_dir,
-            config=OmegaConf.to_container(cfg, resolve=True),
+            config=cfg_container,
         )
         print(colored("Logs will be synced with wandb.", "blue", attrs=["bold"]))
         self._wandb = wandb
