@@ -119,16 +119,18 @@ class VideoRecorderManiskill3:
         self.frames = {
             "wrist_rgb": [],
             "cam_additional_0_rgb": [],
-            "cam_additional_1_rgb": [],
         }
+        if cfg.task.endswith("_multiview"):
+            self.frames["cam_additional_1_rgb"] = []
         self.enabled = False
 
     def init(self, obs, enabled=True):
         self.frames = {
             "wrist_rgb": [],
             "cam_additional_0_rgb": [],
-            "cam_additional_1_rgb": [],
         }
+        if self.cfg.task.endswith("_multiview"):
+            self.frames["cam_additional_1_rgb"] = []
         self.enabled = self._save_dir and self._wandb and enabled
         self.record(obs)
 
@@ -188,7 +190,7 @@ class Logger:
         print(colored("Logs will be synced with wandb.", "blue", attrs=["bold"]))
         self._wandb = wandb
         if self._wandb and cfg.save_video:
-            if cfg.obs == "rgb_multiview":
+            if cfg.obs == "rgb_maniskill3":
                 self._video = VideoRecorderManiskill3(cfg, self._wandb)
             else:
                 self._video = VideoRecorder(cfg, self._wandb)

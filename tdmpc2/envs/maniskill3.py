@@ -11,12 +11,15 @@ from mani_skill.envs.tasks import (
     PegInsertionSideEnv,
 )
 from mani_skill.utils.wrappers.gymnasium import ManiSkillCPUGymWrapper
-from .maniskill3_multiview import MultiViewEnv
 from envs.wrappers.time_limit import TimeLimit
 import sapien
 import torch
 from mani_skill.envs.utils.randomization.pose import random_quaternions
 from mani_skill.utils.structs.pose import Pose
+from mani_skill.sensors.camera import CameraConfig
+from mani_skill.utils import sapien_utils
+from collections import deque
+from tensordict import TensorDict
 
 
 class PickCubeEnv(PickCubeEnvOriginal):
@@ -71,153 +74,292 @@ class PickSingleYCBEnv(PickSingleYCBEnvOriginal):
                 raise NotImplementedError(self.robot_uids)
 
 
-MANISKILL_MULTIVIEW_TASKS = {
-    "push-cube-multiview": dict(
-        env="PushCube-v1-multiview",
+class SingleViewEnv:
+
+    def _load_scene(self, options: dict):
+        super()._load_scene(options)
+        self.table_scene.ground.remove_from_scene()
+        self.table_scene.ground = self._build_fake_ground(
+            self.table_scene.scene, name="fake-ground"
+        )
+
+    def _build_fake_ground(self, scene, floor_width=20, altitude=0, name="ground"):
+        ground = scene.create_actor_builder()
+        ground.add_plane_collision(
+            pose=sapien.Pose(p=[0, 0, altitude], q=[0.7071068, 0, -0.7071068, 0]),
+        )
+        ground.add_plane_visual(
+            pose=sapien.Pose(p=[0, 0, altitude], q=[0.7071068, 0, -0.7071068, 0]),
+            scale=(floor_width, floor_width, floor_width),
+            material=sapien.render.RenderMaterial(
+                base_color=[0.9, 0.9, 0.93, 0], metallic=0.5, roughness=0.5
+            ),
+        )
+        return ground.build_static(name=name)
+
+
+class Maniskill3PixelWrapper(gym.Wrapper):
+    """
+    Wrapper for pixel observations. Compatible with Maniskill3 environments.
+    """
+
+    def __init__(self, cfg, env, num_frames=3, render_size=64):
+        super().__init__(env)
+        self.cfg = cfg
+        self.env = env
+        self.observation_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(num_frames * 3, render_size, render_size),
+            dtype=np.uint8,
+        )
+        self._maxlen = num_frames
+        obs_space = dict()
+        self._frames = dict()
+        for k, v in self.env.observation_space.spaces.items():
+            if k == "state":
+                obs_space[k] = v
+            else:
+                obs_space[k] = gym.spaces.Box(
+                    low=0,
+                    high=255,
+                    shape=(3 * num_frames, render_size, render_size),
+                    dtype=np.uint8,
+                )
+                self._frames[k] = deque([], maxlen=num_frames)
+
+        self.observation_space = gym.spaces.Dict(obs_space)
+
+    def reset(self):
+        obs = self.env.reset()
+        for _ in range(self._maxlen):
+            for k in self._frames.keys():
+                self._frames[k].append(obs[k].permute(2, 0, 1))
+        out = {
+            "state": obs["state"],
+        }
+        for k in self._frames.keys():
+            out[k] = torch.concatenate(list(self._frames[k]))
+        return TensorDict(out)
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        new_obs = {
+            "state": obs["state"],
+        }
+        for k in self._frames.keys():
+            self._frames[k].append(obs[k].permute(2, 0, 1))
+            new_obs[k] = torch.concatenate(list(self._frames[k]))
+        return TensorDict(new_obs), reward, done, info
+
+
+MANISKILL_TASKS = {
+    "ms3-push-cube": dict(
+        env="MS3-PushCube-v1",
         control_mode="pd_ee_delta_pose",
     ),
-    "pick-cube-multiview": dict(
-        env="PickCube-v1-multiview",
+    "ms3-pick-cube": dict(
+        env="MS3-PickCube-v1",
         control_mode="pd_ee_delta_pose",
     ),
-    "stack-cube-multiview": dict(
-        env="StackCube-v1-multiview",
+    "ms3-stack-cube": dict(
+        env="MS3-StackCube-v1",
         control_mode="pd_ee_delta_pose",
     ),
-    "pick-ycb-multiview": dict(
-        env="PickSingleYCB-v1-multiview",
+    "ms3-pick-ycb": dict(
+        env="MS3-PickSingleYCB-v1",
         control_mode="pd_ee_delta_pose",
     ),
-    "peg-insertion-side-multiview": dict(
-        env="PegInsertionSide-v1-multiview",
+    "ms3-peg-insertion-side": dict(
+        env="MS3-PegInsertionSide-v1",
         control_mode="pd_ee_delta_pose",
     ),
 }
 
 
-@register_env("PushCube-v1-multiview")
-class PushCubeEnvMultiView(MultiViewEnv, PushCubeEnv):
+@register_env("MS3-PushCube-v1")
+class PushCubeEnvSingleView(SingleViewEnv, PushCubeEnv):
     SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
-    ADDITIONAL_CAMERA_SAMPLING_CONFIG = {
-        "radius_limits": [0.4, 0.5],
-        "phi_limits": [-0.3 * np.pi, 0.3 * np.pi],
-        "theta_limits": [0.0, 1.0],
-    }
 
     def __init__(self, *args, **kwargs):
-        MultiViewEnv.__init__(
-            self,
-            kwargs.pop("randomize_cameras"),
-            kwargs.pop("num_additional_cams"),
-            kwargs.pop("cam_resolution"),
-            kwargs.pop("near_far"),
-        )
-        PushCubeEnv.__init__(
-            self,
-            *args,
-            reconfiguration_freq=1 if self._randomize_cameras else 0,
-            **kwargs
-        )
+        self._cam_resolution = kwargs.pop("cam_resolution")
+        self._near_far = kwargs.pop("near_far")
+        PushCubeEnv.__init__(self, *args, **kwargs)
+
+    @property
+    def _default_sensor_configs(self):
+        pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        return [
+            CameraConfig(
+                "cam_wrist",
+                Pose.create_from_pq([0, 0, 0], [1, 0, 0, 0]),
+                height=self._cam_resolution[0],
+                width=self._cam_resolution[1],
+                fov=np.pi / 2,
+                near=self._near_far[0],
+                far=self._near_far[1],
+                mount=sapien_utils.get_obj_by_name(
+                    self.agent.robot.links, "camera_link"
+                ),
+            ),
+            CameraConfig(
+                "cam_additional_0",
+                pose=pose,
+                width=self._cam_resolution[0],
+                height=self._cam_resolution[1],
+                fov=np.pi / 2,
+                near=self._near_far[0],
+                far=self._near_far[1],
+            ),
+        ]
 
 
-@register_env("PickCube-v1-multiview")
-class PickCubeEnvMultiView(MultiViewEnv, PickCubeEnv):
+@register_env("MS3-PickCube-v1")
+class PickCubeEnvSingleView(SingleViewEnv, PickCubeEnv):
     SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
-    ADDITIONAL_CAMERA_SAMPLING_CONFIG = {
-        "radius_limits": [0.5, 0.7],
-        "phi_limits": [-0.3 * np.pi, 0.3 * np.pi],
-        "theta_limits": [0.0, 1.0],
-    }
 
     def __init__(self, *args, **kwargs):
-        MultiViewEnv.__init__(
-            self,
-            kwargs.pop("randomize_cameras"),
-            kwargs.pop("num_additional_cams"),
-            kwargs.pop("cam_resolution"),
-            kwargs.pop("near_far"),
-        )
-        PickCubeEnv.__init__(
-            self,
-            *args,
-            reconfiguration_freq=1 if self._randomize_cameras else 0,
-            **kwargs
-        )
+        self._cam_resolution = kwargs.pop("cam_resolution")
+        self._near_far = kwargs.pop("near_far")
+        PickCubeEnv.__init__(self, *args, **kwargs)
+
+    @property
+    def _default_sensor_configs(self):
+        pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        return [
+            CameraConfig(
+                "cam_wrist",
+                Pose.create_from_pq([0, 0, 0], [1, 0, 0, 0]),
+                height=self._cam_resolution[0],
+                width=self._cam_resolution[1],
+                fov=np.pi / 2,
+                near=self._near_far[0],
+                far=self._near_far[1],
+                mount=sapien_utils.get_obj_by_name(
+                    self.agent.robot.links, "camera_link"
+                ),
+            ),
+            CameraConfig(
+                "cam_additional_0",
+                pose,
+                self._cam_resolution[0],
+                self._cam_resolution[1],
+                np.pi / 2,
+                self._near_far[0],
+                self._near_far[1],
+            ),
+        ]
 
 
-@register_env("StackCube-v1-multiview")
-class StackCubeEnvMultiView(MultiViewEnv, StackCubeEnv):
+@register_env("MS3-StackCube-v1")
+class StackCubeEnvSingleView(SingleViewEnv, StackCubeEnv):
     SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
-    ADDITIONAL_CAMERA_SAMPLING_CONFIG = {
-        "radius_limits": [0.6, 0.8],
-        "phi_limits": [-0.3 * np.pi, 0.3 * np.pi],
-        "theta_limits": [0.0, 1.0],
-    }
 
     def __init__(self, *args, **kwargs):
-        MultiViewEnv.__init__(
-            self,
-            kwargs.pop("randomize_cameras"),
-            kwargs.pop("num_additional_cams"),
-            kwargs.pop("cam_resolution"),
-            kwargs.pop("near_far"),
-        )
-        StackCubeEnv.__init__(
-            self,
-            *args,
-            reconfiguration_freq=1 if self._randomize_cameras else 0,
-            **kwargs
-        )
+        self._cam_resolution = kwargs.pop("cam_resolution")
+        self._near_far = kwargs.pop("near_far")
+        StackCubeEnv.__init__(self, *args, **kwargs)
+
+    @property
+    def _default_sensor_configs(self):
+        pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        return [
+            CameraConfig(
+                "cam_wrist",
+                Pose.create_from_pq([0, 0, 0], [1, 0, 0, 0]),
+                height=self._cam_resolution[0],
+                width=self._cam_resolution[1],
+                fov=np.pi / 2,
+                near=self._near_far[0],
+                far=self._near_far[1],
+                mount=sapien_utils.get_obj_by_name(
+                    self.agent.robot.links, "camera_link"
+                ),
+            ),
+            CameraConfig(
+                "cam_additional_0",
+                pose,
+                self._cam_resolution[0],
+                self._cam_resolution[1],
+                np.pi / 2,
+                self._near_far[0],
+                self._near_far[1],
+            ),
+        ]
 
 
-@register_env("PickSingleYCB-v1-multiview")
-class PickSingleYCBEnvMultiView(MultiViewEnv, PickSingleYCBEnv):
+@register_env("MS3-PickSingleYCB-v1")
+class PickSingleYCBEnvSingleView(SingleViewEnv, PickSingleYCBEnv):
     SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
-    ADDITIONAL_CAMERA_SAMPLING_CONFIG = {
-        "radius_limits": [0.5, 0.6],
-        "phi_limits": [-0.3 * np.pi, 0.3 * np.pi],
-        "theta_limits": [0.0, 1.0],
-    }
 
     def __init__(self, *args, **kwargs):
-        MultiViewEnv.__init__(
-            self,
-            kwargs.pop("randomize_cameras"),
-            kwargs.pop("num_additional_cams"),
-            kwargs.pop("cam_resolution"),
-            kwargs.pop("near_far"),
-        )
-        PickSingleYCBEnv.__init__(
-            self,
-            *args,
-            reconfiguration_freq=1 if self._randomize_cameras else 0,
-            **kwargs
-        )
+        self._cam_resolution = kwargs.pop("cam_resolution")
+        self._near_far = kwargs.pop("near_far")
+        PickSingleYCBEnv.__init__(self, *args, **kwargs)
+
+    @property
+    def _default_sensor_configs(self):
+        pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        return [
+            CameraConfig(
+                "cam_wrist",
+                Pose.create_from_pq([0, 0, 0], [1, 0, 0, 0]),
+                height=self._cam_resolution[0],
+                width=self._cam_resolution[1],
+                fov=np.pi / 2,
+                near=self._near_far[0],
+                far=self._near_far[1],
+                mount=sapien_utils.get_obj_by_name(
+                    self.agent.robot.links, "camera_link"
+                ),
+            ),
+            CameraConfig(
+                "cam_additional_0",
+                pose,
+                self._cam_resolution[0],
+                self._cam_resolution[1],
+                np.pi / 2,
+                self._near_far[0],
+                self._near_far[1],
+            ),
+        ]
 
 
-@register_env("PegInsertionSide-v1-multiview")
-class PegInsertionSideEnvMultiView(MultiViewEnv, PegInsertionSideEnv):
+@register_env("MS3-PegInsertionSide-v1")
+class PegInsertionSideEnvSingleView(SingleViewEnv, PegInsertionSideEnv):
     SUPPORTED_ROBOTS = ["panda", "panda_wristcam", "xmate3_robotiq", "fetch"]
-    ADDITIONAL_CAMERA_SAMPLING_CONFIG = {
-        "radius_limits": [0.3, 0.4],
-        "phi_limits": [-1.0 * np.pi, 0.0 * np.pi],
-        "theta_limits": [0.0, 1.0],
-    }
 
     def __init__(self, *args, **kwargs):
-        MultiViewEnv.__init__(
-            self,
-            kwargs.pop("randomize_cameras"),
-            kwargs.pop("num_additional_cams"),
-            kwargs.pop("cam_resolution"),
-            kwargs.pop("near_far"),
-        )
-        PegInsertionSideEnv.__init__(
-            self,
-            *args,
-            reconfiguration_freq=1 if self._randomize_cameras else 0,
-            **kwargs
-        )
+        self._cam_resolution = kwargs.pop("cam_resolution")
+        self._near_far = kwargs.pop("near_far")
+        PegInsertionSideEnv.__init__(self, *args, **kwargs)
+
+    @property
+    def _default_sensor_configs(self):
+        pose = sapien_utils.look_at([0, -0.3, 0.2], [0, 0, 0.1])
+        return [
+            CameraConfig(
+                "cam_wrist",
+                Pose.create_from_pq([0, 0, 0], [1, 0, 0, 0]),
+                height=self._cam_resolution[0],
+                width=self._cam_resolution[1],
+                fov=np.pi / 2,
+                near=self._near_far[0],
+                far=self._near_far[1],
+                mount=sapien_utils.get_obj_by_name(
+                    self.agent.robot.links, "camera_link"
+                ),
+            ),
+            CameraConfig(
+                "cam_additional_0",
+                pose,
+                self._cam_resolution[0],
+                self._cam_resolution[1],
+                np.pi / 2,
+                self._near_far[0],
+                self._near_far[1],
+            ),
+        ]
 
 
 class Gymnasium2GymWrapper(gym.Wrapper):
@@ -241,7 +383,7 @@ class Gymnasium2GymWrapper(gym.Wrapper):
         return self.env.render()
 
 
-class MultiViewManiSkillWrapper(gym.Wrapper):
+class ManiSkillWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.env = env
@@ -254,9 +396,6 @@ class MultiViewManiSkillWrapper(gym.Wrapper):
                     low=0, high=255, shape=(3, 64, 64), dtype=np.uint8
                 ),
                 "cam_additional_0_rgb": gym.spaces.Box(
-                    low=0, high=255, shape=(3, 64, 64), dtype=np.uint8
-                ),
-                "cam_additional_1_rgb": gym.spaces.Box(
                     low=0, high=255, shape=(3, 64, 64), dtype=np.uint8
                 ),
             }
@@ -273,7 +412,6 @@ class MultiViewManiSkillWrapper(gym.Wrapper):
             "state": state,
             "wrist_rgb": obs["sensor_data"]["cam_wrist"]["rgb"],
             "cam_additional_0_rgb": obs["sensor_data"]["cam_additional_0"]["rgb"],
-            "cam_additional_1_rgb": obs["sensor_data"]["cam_additional_1"]["rgb"],
         }
         return obs
 
@@ -321,24 +459,22 @@ def make_env(cfg):
     """
     Make ManiSkill3 environment.
     """
-    if cfg.task not in MANISKILL_MULTIVIEW_TASKS:
+    if cfg.task not in MANISKILL_TASKS:
         raise ValueError("Unknown task:", cfg.task)
-    assert cfg.obs == "rgb_multiview", "This task only supports rgb observations."
-    task_cfg = MANISKILL_MULTIVIEW_TASKS[cfg.task]
+    assert cfg.obs == "rgb_maniskill3", "This task only supports rgb observations."
+    task_cfg = MANISKILL_TASKS[cfg.task]
     env = gymnasium.make(
         task_cfg["env"],
         obs_mode="rgbd",
         robot_uids="panda_wristcam",
         control_mode=task_cfg["control_mode"],
-        randomize_cameras=True,
-        num_additional_cams=2,
         near_far=[0.00001, 2.0],
         cam_resolution=[64, 64],
         render_mode=cfg.render_mode if cfg.render_mode else None,
     )
     env = ManiSkillCPUGymWrapper(env)
     env = Gymnasium2GymWrapper(env)
-    env = MultiViewManiSkillWrapper(env)
+    env = ManiSkillWrapper(env)
     env = ActionRepeatWrapper(env, repeat=2)
     env = TimeLimit(env, max_episode_steps=100)
     env.max_episode_steps = env._max_episode_steps

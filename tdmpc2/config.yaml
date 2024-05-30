@@ -2,9 +2,9 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: push-cube-multiview
+task: ms3-push-cube-multiview
 # task: quadruped-walk
-obs: rgb_multiview
+obs: rgb_maniskill3
 # obs: rgb
 
 # evaluation
@@ -73,7 +73,7 @@ save_csv: false
 # misc
 save_video: true
 save_agent: true
-seed: 1
+seed: 0
 
 # convenience
 work_dir: ???

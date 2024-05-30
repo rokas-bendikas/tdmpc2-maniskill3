@@ -30,7 +30,7 @@ class OnlineTrainer(Trainer):
         for i in range(self.cfg.eval_episodes):
             obs, done, ep_reward, t = self.env.reset(), False, 0, 0
             if self.cfg.save_video:
-                if self.cfg.obs == "rgb_multiview":
+                if self.cfg.obs == "rgb_maniskill3":
                     self.logger.video.init(obs, enabled=(i == 0))
                 else:
                     self.logger.video.init(self.env, enabled=(i == 0))
@@ -40,7 +40,7 @@ class OnlineTrainer(Trainer):
                 ep_reward += reward
                 t += 1
                 if self.cfg.save_video:
-                    if self.cfg.obs == "rgb_multiview":
+                    if self.cfg.obs == "rgb_maniskill3":
                         self.logger.video.record(obs)
                     else:
                         self.logger.video.record(self.env)

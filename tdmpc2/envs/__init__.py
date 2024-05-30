@@ -6,7 +6,7 @@ import gym
 from envs.wrappers.multitask import MultitaskWrapper
 from envs.wrappers.pixels import PixelWrapper
 from envs.wrappers.tensor import TensorWrapper
-from envs.maniskill3_multiview import MultiviewPixelWrapper
+from envs.maniskill3 import Maniskill3PixelWrapper
 
 
 def missing_dependencies(task):
@@ -35,6 +35,12 @@ try:
     from envs.maniskill3 import make_env as make_maniskill3_env
 except:
     make_maniskill3_env = missing_dependencies
+try:
+    from envs.maniskill3_multiview import (
+        make_env as make_maniskill3_multiview_env,
+    )
+except:
+    make_maniskill3_multiview_env = missing_dependencies
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -77,6 +83,7 @@ def make_env(cfg):
             make_metaworld_env,
             make_myosuite_env,
             make_maniskill3_env,
+            make_maniskill3_multiview_env,
         ]:
             try:
                 env = fn(cfg)
@@ -89,8 +96,8 @@ def make_env(cfg):
         env = TensorWrapper(env)
     if cfg.get("obs", "state") == "rgb":
         env = PixelWrapper(cfg, env)
-    if cfg.get("obs", "state") == "rgb_multiview":
-        env = MultiviewPixelWrapper(cfg, env)
+    if cfg.get("obs", "state") == "rgb_maniskill3":
+        env = Maniskill3PixelWrapper(cfg, env)
     try:  # Dict
         cfg.obs_shape = {k: v.shape for k, v in env.observation_space.spaces.items()}
     except:  # Box

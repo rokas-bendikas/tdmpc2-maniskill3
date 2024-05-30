@@ -12,12 +12,14 @@ class MultiViewCNNEncoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self._wrist_enc = conv(cfg.obs_shape["wrist_rgb"], cfg.num_channels, act=SimNorm(cfg))
+        self._wrist_enc = conv(
+            cfg.obs_shape["wrist_rgb"], cfg.num_channels, act=SimNorm(cfg)
+        )
         self._additional_enc = conv(
-            cfg.obs_shape["cam_additional_1_rgb"], cfg.num_channels, act=SimNorm(cfg)
+            cfg.obs_shape["cam_additional_0_rgb"], cfg.num_channels, act=SimNorm(cfg)
         )
         self._state_enc = mlp(
-            cfg.obs_shape['state'][0] + cfg.task_dim,
+            cfg.obs_shape["state"][0] + cfg.task_dim,
             max(cfg.num_enc_layers - 1, 1) * [cfg.enc_dim],
             cfg.latent_dim,
             act=SimNorm(cfg),
@@ -25,10 +27,16 @@ class MultiViewCNNEncoder(nn.Module):
 
     def forward(self, obs):
         wrist = self._wrist_enc(obs["wrist_rgb"])
-        additional_0 = self._additional_enc(obs["cam_additional_0_rgb"])
-        additional_1 = self._additional_enc(obs["cam_additional_1_rgb"])
+        # Find the number of keys that start with cam_additional_
+        num_additional = len(
+            [key for key in obs.keys() if key.startswith("cam_additional_")]
+        )
+        additionals = [
+            self._additional_enc(obs[f"cam_additional_{i}_rgb"])
+            for i in range(num_additional)
+        ]
         state = self._state_enc(obs["state"])
-        out = torch.stack([wrist, additional_0, additional_1, state]).mean(dim=0)
+        out = torch.stack([wrist] + additionals + [state]).mean(dim=0)
         return out
 
 
@@ -46,7 +54,9 @@ class WorldModel(nn.Module):
             self._action_masks = torch.zeros(len(cfg.tasks), cfg.action_dim)
             for i in range(len(cfg.tasks)):
                 self._action_masks[i, : cfg.action_dims[i]] = 1.0
-        self._encoder = MultiViewCNNEncoder(cfg) if cfg.obs == "rgb_multiview" else layers.enc(cfg)
+        self._encoder = (
+            MultiViewCNNEncoder(cfg) if cfg.obs == "rgb_maniskill3" else layers.enc(cfg)
+        )
         self._dynamics = layers.mlp(
             cfg.latent_dim + cfg.action_dim + cfg.task_dim,
             2 * [cfg.mlp_dim],
@@ -149,7 +159,7 @@ class WorldModel(nn.Module):
             else:
                 return self._encoder[self.cfg.obs](obs)
 
-        if self.cfg.obs == "rgb_multiview":
+        if self.cfg.obs == "rgb_maniskill3":
             if obs.ndim == 1:
                 return self._encoder(obs)
             elif obs.ndim == 2:
