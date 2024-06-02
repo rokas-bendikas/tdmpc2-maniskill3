@@ -35,6 +35,10 @@ class PickSingleYCBEnv(PickSingleYCBEnvOriginal):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    def _load_scene(self, options: dict):
+        super()._load_scene(options)
+        self._hidden_objects.remove(self.goal_site)
+
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
             b = len(env_idx)
